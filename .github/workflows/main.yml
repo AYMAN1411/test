@@ -1,0 +1,120 @@
+name: APK P4A Build
+
+on:
+  push:
+    branches:
+      - main
+
+  pull_request:
+    branches:
+      - main
+
+  workflow_dispatch:
+
+env:
+  PYTHON_VERSION: 3.11.9
+  FLUTTER_VERSION: 3.24.3
+  NDK_VERSION: 25.2.9519653 
+  SDK_VERSION: android-35
+  ANDROID_SDK_TOOLS: "6514223"
+  # Dependencias de P4A
+  P4A_VERSION: 3.11.6
+  P4A_REQUIREMENTS: "numpy,cryptography,Pillow,opencv-python"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Cache de los archivos de Python
+      - name: Cache python
+        uses: actions/cache@v4
+        with:
+          path: /opt/hostedtoolcache/Python
+          key: ${{ runner.os }}-python-${{ env.PYTHON_VERSION }}
+
+      - name: Setup Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+        
+
+      # Cache de los archivos de Python for Android (.p4a)
+      - name: Cache p4a
+        uses: actions/cache@v4
+        with:
+          path: /home/runner/.local/share/python-for-android
+          key: ${{ runner.os }}-p4a
+       
+      - name: Install Python Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r Planilla/requirements.txt
+
+
+      - name: Cache Flutter dependencies
+        uses: actions/cache@v4
+        with:
+          path: /opt/hostedtoolcache/flutter
+          key: ${{ runner.OS }}-flutter-install-cache-${{ env.FLUTTER_VERSION }}
+
+      - name: Setup Flutter ${{ env.FLUTTER_VERSION }}
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          #cache: true
+      
+
+      - name: Setup Java JDK
+        uses: actions/setup-java@v4.2.1
+        with:
+          distribution: "temurin"
+          java-version: "17"
+
+
+      - name: Configurar variables de entorno de Android
+        run: |
+          echo "ANDROID_SDK_ROOT=/usr/local/lib/android/sdk" >> $GITHUB_ENV
+          echo "PATH=$ANDROID_SDK_ROOT/tools/bin:$PATH" >> $GITHUB_ENV
+        #  echo "JAVA_HOME=$JAVA_HOME" >> $GITHUB_ENV
+        shell: bash
+
+
+      - name: Setup Android setup-android
+        uses: android-actions/setup-android@v3
+        
+
+      - name: Setup Android NDK y SDK
+        run: |
+          sdkmanager --install "ndk;$NDK_VERSION" --channel=3 --sdk_root=${ANDROID_SDK_ROOT}
+          sdkmanager --install "platforms;$SDK_VERSION"
+  
+
+      - name: Instalar p4a y Cython
+        run: |
+          pip3 install git+https://github.com/flet-dev/python-for-android.git@$P4A_VERSION
+          pip install --upgrade cython
+
+      - name: Construir distribución de Python con p4a
+        run: |
+          p4a create --requirements $P4A_REQUIREMENTS --arch arm64-v8a --arch armeabi-v7a --arch x86_64 --sdk-dir $ANDROID_SDK_ROOT --ndk-dir $ANDROID_SDK_ROOT/ndk/$NDK_VERSION --dist-name mydist
+             
+      - name: Definir SERIOUS_PYTHON_P4A_DIST
+        run: |
+          echo "SERIOUS_PYTHON_P4A_DIST=$HOME/.local/share/python-for-android/dists/mydist" >> $GITHUB_ENV
+
+      - name: Flet Build APK
+        run: |
+          flutter config --no-analytics # disable flutter analytics
+          chmod +x build.sh
+          ./build.sh apk
+  
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4.3.4  # https://github.com/marketplace/actions/upload-a-build-artifact
+        with:
+          name: apk-build-artifact  # the name of the artifact
+          path: build/apk  # location of Flet build output
+          if-no-files-found: error  # Fail the action with an error message if no files are found
+          overwrite: false  # If true, an artifact with a matching name will be deleted before a new one is uploaded. If false, the action will fail if an artifact for the given name already exists. Does not fail if the artifact does not exist
