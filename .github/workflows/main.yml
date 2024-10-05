@@ -19,7 +19,7 @@ env:
   ANDROID_SDK_TOOLS: "6514223"
   # Dependencias de P4A
   P4A_VERSION: 3.11.6
-  P4A_REQUIREMENTS: "numpy,cryptography,Pillow,opencv-python"
+  P4A_REQUIREMENTS: "manage-sql"
 
 jobs:
   build:
@@ -51,7 +51,7 @@ jobs:
       - name: Install Python Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r Planilla/requirements.txt
+          pip install -r test/requirements.txt
 
 
       - name: Cache Flutter dependencies
