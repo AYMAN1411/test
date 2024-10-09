@@ -1,123 +1,101 @@
 import flet as ft
-from manage_sql import POSTGRESQL
-from manage_sql import *
+import os
+import tempfile
+import atexit
+from tnefparse import TNEF
+from flet import FilePicker, FilePickerResultEvent
+import subprocess
+import platform
 
-# Database connection details
-url = 'postgresql://8s6d5t:xau_iSi58LvZL52Zy9NvpvoDLpulsaj4nCDB9@us-east-1.sql.xata.sh/testdatbase:main?sslmode=require'
+# Global list to keep track of temporary files
+temp_files = []
+
+def cleanup_temp_files():
+    global temp_files
+    for file_path in temp_files:
+        try:
+            if os.path.exists(file_path):
+                os.unlink(file_path)
+        except Exception:
+            pass  # Ignore errors during cleanup
+    temp_files = []
+
+# Register the cleanup function to run at exit
+atexit.register(cleanup_temp_files)
 
 def main(page: ft.Page):
-    page.title = "Like/Dislike App"
-    page.vertical_alignment = ft.MainAxisAlignment.CENTER
+    page.title = "Winmail.dat Decryptor"
+    decrypted_files = []
 
-    # Connect to PostgreSQL database using manage-sql
-    db = db=POSTGRESQL(
-    postgre_url=url
-)
-    conn, cursor = db.conectarBanco()
+    def pick_file(e: FilePickerResultEvent):
+        if e.files:
+            winmail_file.value = e.files[0].path
+            decrypt_file(e)
+            page.update()
 
-    # Create table if not exists
-    db.criarTabela(
-        nomeTabela='like_dislike',
-        Colunas=['name', 'opinion'],
-        ColunasTipo=['TEXT', 'TEXT']
-    )
+    def decrypt_file(e):
+        file_path = winmail_file.value
+        if file_path and os.path.exists(file_path):
+            decrypted_files.clear()
+            with open(file_path, 'rb') as f:
+                file_data = f.read()
+                tnef = TNEF(file_data)
+                for attachment in tnef.attachments:
+                    decrypted_files.append((attachment.name, attachment.data))
+            
+            decrypted_list.controls.clear()
+            for filename, _ in decrypted_files:
+                file_item = ft.TextButton(filename, on_click=lambda e, name=filename: open_file(name))
+                decrypted_list.controls.append(file_item)
+            page.update()
 
-    # Variable to store the current opinion
-    current_opinion = None
-
-    def save_opinion(e):
-        name = name_input.value
-        if not name:
-            page.snack_bar = ft.SnackBar(content=ft.Text("Please enter your name"))
+    def save_files(e: FilePickerResultEvent):
+        if e.path and decrypted_files:
+            for filename, data in decrypted_files:
+                save_path = os.path.join(e.path, filename)
+                with open(save_path, 'wb') as output_file:
+                    output_file.write(data)
+            page.snack_bar = ft.SnackBar(ft.Text("Files saved successfully!"))
             page.snack_bar.open = True
             page.update()
-            return
-        
-        if current_opinion is None:
-            page.snack_bar = ft.SnackBar(content=ft.Text("Please select an opinion"))
-            page.snack_bar.open = True
-            page.update()
-            return
-        # db.inserirDados(nomeTabela=nometabeta, Colunas=colunas, dados=['Web Tech','webtechmoz',db.encriptarValor('1'),'ayman@gmail.com'])
-        db.inserirDados(
-            nomeTabela='like_dislike',
-            Colunas=['name', 'opinion'],
-            dados=[name, "Like" if current_opinion else "Dislike"]
-        )
-        update_list()
-        name_input.value = ""
-        reset_buttons()
-        page.update()
 
-    def update_list():
-        # rows = db.verDados(
-        #     nomeTabela='like_dislike',
-        #     Colunas=['name', 'opinion']
-        # )
-        # opinions_list.controls.clear()
-        # for row in rows:
-        #     opinions_list.controls.append(ft.Text(f"{row[0]}: {row[1]}"))
-        # page.update()
-        ...
+    def open_file(filename):
+        for name, data in decrypted_files:
+            if name == filename:
+                with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(name)[1]) as temp_file:
+                    temp_file.write(data)
+                    temp_file_path = temp_file.name
+                try:
+                    if platform.system() == "Windows":
+                        os.startfile(temp_file_path)
+                    elif platform.system() == "Darwin":  # macOS
+                        subprocess.call(('open', temp_file_path))
+                    else:  # Linux and Android
+                        subprocess.call(('xdg-open', temp_file_path))
+                    
+                    # Add the temp file to the global list for later cleanup
+                    global temp_files
+                    temp_files.append(temp_file_path)
+                except Exception as e:
+                    page.snack_bar = ft.SnackBar(ft.Text(f"Error opening file: {str(e)}"))
+                    page.snack_bar.open = True
+                    page.update()
+                break
 
-    def toggle_thumb(button: ft.IconButton, value: bool):
-        nonlocal current_opinion
-        current_opinion = value
-        thumb_up_button.icon_color = ft.colors.BLUE if button == thumb_up_button else ft.colors.GREY
-        thumb_down_button.icon_color = ft.colors.BLUE if button == thumb_down_button else ft.colors.GREY
-        page.update()
-
-    def reset_buttons():
-        nonlocal current_opinion
-        current_opinion = None
-        thumb_up_button.icon_color = ft.colors.GREY
-        thumb_down_button.icon_color = ft.colors.GREY
-
-    name_input = ft.TextField(label="Enter your name")
-
-    thumb_up_button = ft.IconButton(
-        icon=ft.icons.THUMB_UP,
-        icon_color=ft.colors.GREY,
-        on_click=lambda _: toggle_thumb(thumb_up_button, True)
-    )
-
-    thumb_down_button = ft.IconButton(
-        icon=ft.icons.THUMB_DOWN,
-        icon_color=ft.colors.GREY,
-        on_click=lambda _: toggle_thumb(thumb_down_button, False)
-    )
-
-    opinions_list = ft.ListView(
-        expand=1,
-        spacing=10,
-        padding=20,
-        auto_scroll=True
-    )
+    winmail_file = ft.TextField(label="Selected File", disabled=True)
+    pick_button = ft.ElevatedButton("Pick winmail.dat", on_click=lambda _: file_picker.pick_files())
+    save_button = ft.ElevatedButton("Save Files", on_click=lambda _: save_picker.get_directory_path())
+    
+    decrypted_list = ft.Column()
+    file_picker = FilePicker(on_result=pick_file)
+    save_picker = FilePicker(on_result=save_files)
+    page.overlay.extend([file_picker, save_picker])
 
     page.add(
-        ft.Column(
-            [
-                name_input,
-                ft.Row(
-                    [thumb_up_button, thumb_down_button],
-                    alignment=ft.MainAxisAlignment.CENTER
-                ),
-                ft.ElevatedButton("Save Opinion", on_click=save_opinion),
-                ft.Text("Opinions:"),
-                ft.Container(
-                    content=opinions_list,
-                    height=200,
-                    border=ft.border.all(1, ft.colors.OUTLINE),
-                    border_radius=5,
-                    padding=10,
-                    expand=True
-                )
-            ],
-            alignment=ft.MainAxisAlignment.CENTER,
-            horizontal_alignment=ft.CrossAxisAlignment.CENTER
-        )
+        winmail_file,
+        pick_button,
+        decrypted_list,
+        save_button
     )
-
-    update_list()
 
 ft.app(target=main)
